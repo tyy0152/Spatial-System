@@ -1,0 +1,8 @@
+fastapi==0.110.0
+uvicorn==0.28.0
+psycopg[binary]>=3.2.2
+sqlalchemy>=2.0.36
+pydantic==2.10.0
+geoalchemy2==0.14.3
+requests>=2.31.0
+openai>=1.50.0

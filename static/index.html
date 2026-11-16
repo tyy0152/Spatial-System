@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>城市空间兴趣点智能检索与 AI 智能体系统</title>
+    <!-- 引入 Leaflet 地图样式 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; display: flex; height: 100vh; background: #f4f4f9; }
+        #sidebar { width: 420px; background: white; box-shadow: 2px 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; z-index: 1000; }
+        #map { flex-grow: 1; height: 100%; }
+        .header { padding: 20px; background: #2c3e50; color: white; }
+        .header h2 { margin: 0; font-size: 18px; }
+        #chat-box { flex-grow: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #fafafa; }
+        .message { padding: 10px 14px; border-radius: 8px; max-width: 85%; line-height: 1.4; font-size: 14px; }
+        .user-msg { background: #007bff; color: white; align-self: flex-end; }
+        .ai-msg { background: #e9ecef; color: #333; align-self: flex-start; white-space: pre-wrap; }
+        .input-area { padding: 15px; border-top: 1px solid #ddd; background: white; display: flex; gap: 10px; }
+        .input-area input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; outline: none; }
+        .input-area button { padding: 10px 15px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .input-area button:hover { background: #218838; }
+        .tip { font-size: 12px; color: #666; padding: 0 20px 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- 左侧：AI 智能体对话与检索面板 -->
+    <div id="sidebar">
+        <div class="header">
+            <h2>🌍 Spatial AI Agent 空间智能系统</h2>
+        </div>
+        <div class="tip">💡 提示：点击地图任意位置可获取坐标，或通过文字指定地点进行智能多模态检索！</div>
+        
+        <!-- 【新增修改点 1】：加入用于展示当前经纬度及坐标来源的动态小标签容器 -->
+        <div id="location-status-tag" style="margin: 0 15px 10px 15px; background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 8px 12px; border-radius: 6px; font-size: 13px; color: #475569; display: flex; align-items: center; gap: 6px;">
+            <span>📍</span> <span>当前中心：等待选择地图或发送消息...</span>
+        </div>
+
+        <div id="chat-box">
+            <div class="message ai-msg">你好！我是你的空间智能助手。你可以问我：“哈理工附近有什么好玩的”，或者直接在右侧地图上点击任意位置！</div>
+        </div>
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="输入你的位置或查询需求..." onkeypress="handleKeyPress(event)">
+            <button onclick="sendAIQuery()">发送</button>
+        </div>
+    </div>
+
+    <!-- 右侧：Leaflet 互动地图 -->
+    <div id="map"></div>
+
+    <!-- 引入 Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 初始化地图，中心设在哈工大附近
+        var map = L.map('map').setView([45.742, 126.632], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        var markersLayer = L.layerGroup().addTo(map);
+        var currentLat = 45.742; // 默认经纬度
+        var currentLon = 126.632;
+        var clickedMarker = null;
+
+        // 初始化时先更新一次默认标签
+        updateLocationTag(currentLat, currentLon, "地图视窗坐标");
+
+        // 1. 地图点击事件：记录坐标并发送给后端 AI 智能体
+        map.on('click', function(e) {
+            currentLat = e.latlng.lat;
+            currentLon = e.latlng.lng;
+            
+            // 本地点击地图时，优先更新为地图视窗坐标标签
+            updateLocationTag(currentLat, currentLon, "地图视窗坐标");
+
+            // 在地图上放置选中标记
+            if (clickedMarker) {
+                map.removeLayer(clickedMarker);
+            }
+            clickedMarker = L.marker([currentLat, currentLon]).addTo(map).bindPopup("📍 当前选择中心点").openPopup();
+
+            appendMessage("📍 我点击了地图坐标：纬度 " + currentLat.toFixed(4) + ", 经度 " + currentLon.toFixed(4), 'user-msg');
+            sendToSpatialAgent("请帮我检索并推荐这个坐标附近的好玩的地方。", currentLat, currentLon);
+        });
+
+        // 2. 发送文字输入事件到 AI 智能体接口
+        function sendAIQuery() {
+            var inputField = document.getElementById('user-input');
+            var text = inputField.value.trim();
+            if (!text) return;
+
+            appendMessage(text, 'user-msg');
+            inputField.value = '';
+
+            // 带着当前的地图中心坐标和文字一起发给后端 AI 智能体
+            sendToSpatialAgent(text, currentLat, currentLon);
+        }
+
+        // 3. 核心通信函数：与后端 /api/chat 交互
+        function sendToSpatialAgent(messageText, lat, lon) {
+            appendMessage("🤖 智能体正在解析意图并执行空间检索中...", 'ai-msg');
+
+            fetch('http://127.0.0.1:8000/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: messageText, lat: lat, lon: lon })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // 替换掉刚才的“思考中”提示，显示 AI 的专业回答
+                replaceLastAiMessage(data.reply);
+
+                // 【新增修改点 2】：接收后端返回的实际生效坐标及仲裁来源（地图/文本），并动态刷新小标签
+                if (data.active_lat && data.active_lon && data.location_source) {
+                    currentLat = data.active_lat;
+                    currentLon = data.active_lon;
+                    updateLocationTag(currentLat, currentLon, data.location_source);
+                }
+            })
+            .catch(err => {
+                replaceLastAiMessage("❌ 与后端 AI 智能体通信失败：" + err);
+            });
+        }
+
+        // 【新增修改点 3】：封装统一的标签更新函数，支持“地图”与“文本语义”的双向状态高亮
+        function updateLocationTag(lat, lon, source) {
+            const tag = document.getElementById('location-status-tag');
+            tag.innerHTML = `📍 <strong>当前中心（${source}）</strong>：纬度 ${lat.toFixed(4)}, 经度 ${lon.toFixed(4)}`;
+            
+            // 如果是大模型通过文本语义仲裁覆盖的坐标，动态将小标签背景设为醒目的浅蓝色
+            if (source.includes("文本")) {
+                tag.style.backgroundColor = "#e0f2fe";
+                tag.style.borderColor = "#bae6fd";
+                tag.style.color = "#0369a1";
+            } else {
+                tag.style.backgroundColor = "#f8fafc";
+                tag.style.borderColor = "#e2e8f0";
+                tag.style.color = "#475569";
+            }
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') { sendAIQuery(); }
+        }
+
+        function appendMessage(text, className) {
+            var chatBox = document.getElementById('chat-box');
+            var div = document.createElement('div');
+            div.className = 'message ' + className;
+            div.innerText = text;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function replaceLastAiMessage(text) {
+            var chatBox = document.getElementById('chat-box');
+            var messages = chatBox.getElementsByClassName('ai-msg');
+            if (messages.length > 0) {
+                messages[messages.length - 1].innerText = text;
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
+```[cite: 4]

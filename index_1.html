@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>城市空间兴趣点（POI）智能检索系统</title>
+    <!-- 引入 Leaflet 地图样式 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; display: flex; height: 100vh; }
+        #sidebar { width: 350px; padding: 20px; box-sizing: border-box; background: #f8f9fa; overflow-y: auto; border-right: 1px solid #ddd; }
+        #map { flex-grow: 1; height: 100%; }
+        .poi-card { background: white; padding: 10px; margin-bottom: 10px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h2 { font-size: 18px; color: #333; }
+        button { background: #007bff; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 10px;}
+        button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>城市空间检索控制台</h2>
+        <p>在地图上点击任意位置，系统将自动检索周边 10 公里内的 POI。</p>
+        <div id="info">当前中心点: <span id="coords">未选择</span></div>
+        <button onclick="loadPois()">刷新/查询周边 POI</button>
+        <h3>检索结果列表</h3>
+        <div id="poi-list"></div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- 引入 Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 初始化地图，以哈尔滨市中心为例
+        const map = L.map('map').setView([45.773, 126.634], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let currentLat = 45.773;
+        let currentLon = 126.634;
+        let marker = L.marker([currentLat, currentLon]).addTo(map).bindPopup("默认中心点").openPopup();
+        let markersLayer = L.layerGroup().addTo(map);
+
+        // 点击地图更换中心点
+        map.on('click', function(e) {
+            currentLat = e.latlng.lat;
+            currentLon = e.latlng.lng;
+            marker.setLatLng([currentLat, currentLon]);
+            document.getElementById('coords').innerText = `${currentLat.toFixed(4)}, ${currentLon.toFixed(4)}`;
+            loadPois();
+        });
+
+        // 异步请求后端空间检索接口
+        async function loadPois() {
+            markersLayer.clearLayers();
+            const response = await fetch(`/api/pois/radius?lat=${currentLat}&lon=${currentLon}&radius=10000`);
+            const pois = await response.json();
+            
+            const listContainer = document.getElementById('poi-list');
+            listContainer.innerHTML = '';
+
+            pois.forEach(poi => {
+                // 在地图上标点
+                const m = L.marker([poi.latitude, poi.longitude])
+                    .addTo(markersLayer)
+                    .bindPopup(`<b>${poi.name}</b><br>类型: ${poi.category}<br>距离: ${poi.distance_meters} 米`);
+                
+                // 在侧边栏渲染卡片
+                const card = document.createElement('div');
+                card.className = 'poi-card';
+                card.innerHTML = `<strong>${poi.name}</strong><br><small>分类：${poi.category} | 距离：${poi.distance_meters}米</small>`;
+                listContainer.appendChild(card);
+            });
+        }
+
+        // 初始化加载一次
+        loadPois();
+    </script>
+</body>
+</html>
